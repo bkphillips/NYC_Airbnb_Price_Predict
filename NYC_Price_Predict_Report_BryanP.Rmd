@@ -1,8 +1,11 @@
-#Author: Bryan Phillips
-# Description: Predicting the price of Airbnb's in NYC using matrix factorization
-# Many portions of this code are influenced by the code given by the matrix factorization and regularlization section of the machine learning course
+---
+title: "Predicting Airbnb Prices in NYC"
+author: "Bryan Phillips"
+date: "1/10/2020"
+output: pdf_document
+---
 
-#Loading all required packages
+```{r setup, include=FALSE}
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
 if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
 if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
@@ -16,55 +19,87 @@ library(data.table)
 library(tidyr)
 library(ggplot2)
 library(latexpdf)
-library(gridExtra)
-
 
 #Dowloading csv of NYC Airbnb open data
 url <- "https://raw.githubusercontent.com/bkphillips/NYC_Airbnb_Price_Predict/master/AB_NYC_2019.csv"
 nyc<-read.csv(url)
 
-#Look at nyc data summary
-head(nyc)
-describe(nyc)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+For this project, I have decided to utilize a large open-source dataset of Airbnb's in New York City in order to create a price prediction model using machine learning techniques from throughout this course. The main technique I will utilize are matrix factorization and regularization.
+
+The dataset contains around 50,000 unique observation on individual Airbnb locations and their price point for 2019. This dataset is available at Kaggle.com at the link here:
+https://www.kaggle.com/dgomonov/new-york-city-airbnb-open-data
+
+The dataset contains 16 variables summarized below, but the main information I will use for this analysis are Neighbourhood, Room Type, and Price.
+
+```{r nyc, echo=FALSE}
 summary(nyc)
+```
 
+The way in which I will be evaluating the overall performance of the model will be to calculate Root Mean Squared Error (RMSE) of each model.
 
+All of the code for this analysis is available on my github linked here:
+https://github.com/bkphillips/NYC_Airbnb_Price_Predict
+
+## Analysis
+
+First looking at the price information, I notice it contains some pretty large outliers as seen in the density plot below:
+
+```{r nyc dist1, echo=FALSE}
 #Looking at normal distribution of price
 ggplot(nyc, aes(price)) +
   geom_histogram(bins = 30, aes(y = ..density..)) + 
   geom_density(alpha = 0.2) +
   geom_vline(xintercept = mean(nyc$price)) 
+```
 
+I then decided to look at the log distribution below, where the average price of $152 becomes more apparent. (average shown with vertical line) 
+
+```{r nyc dist, echo=FALSE, message=FALSE, warning=FALSE}
 #Looking at log distribution
 ggplot(nyc, aes(price)) +
   geom_histogram(bins = 30, aes(y = ..density..)) + 
   geom_density(alpha = 0.2) +
   geom_vline(xintercept = mean(nyc$price)) +
   scale_x_log10() 
+```
 
+The other key descriptive variable are Neighbourhood Group, Neighborhood, and Room type.
 
-#average price is $152
-mean(nyc$price)
+There are 221 unique neighborhoods, so for the purpose of describing the dataset I will mostly show the 5 main groups in which they fall into. There are also 3 main room types: Entire home, private room, or shared room. Below you can see a count of the types of room in the different areas of NYC. You can see the majority of locations are in Manhattan and Brooklyn. They are also mostly entire home/apt. or private rooms.
 
-#Looking at number of rooms by neihborhood by type
+```{r n and type, echo=FALSE, message=FALSE, warning=FALSE}
+#Looking at number of rooms by neihbourhood by type
 nyc %>% group_by(neighbourhood_group, room_type) %>% summarize(n = n()) %>% 
   ggplot(aes(reorder(neighbourhood_group,desc(n)), n, fill = room_type)) + 
-  xlab("Neighborhood") +
+  xlab("Neighbourhood") +
   ylab("Number of Rooms") +
   geom_bar(stat = "identity")
+```
 
+Below is the average price for each neighborhood with Manhattan noticeably more expensive compared to the other neighbourhoods.
+
+```{r n price avg g, echo=FALSE, message=FALSE, warning=FALSE}
 #Average price by neighborhood group
 nyc %>% group_by(neighbourhood_group) %>%
-  summarize(n = n(), avg = mean(price), se = sd(price)/sqrt(n())) %>%
-  mutate(neighbourhood_group = reorder(neighbourhood_group, avg)) %>%
-  ggplot(aes(x = neighbourhood_group, y = avg, ymin = avg - 2*se, ymax = avg + 2*se)) + 
+  summarize(n = n(), avg_price = mean(price), se = sd(price)/sqrt(n())) %>%
+  mutate(neighbourhood_group = reorder(neighbourhood_group, avg_price)) %>%
+  ggplot(aes(x = neighbourhood_group, y = avg_price, ymin = avg_price - 2*se, ymax = avg_price + 2*se)) + 
   geom_point() +
   geom_errorbar() + 
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  ylim(0,210)
 
-#There are 221 distrinct neighborhoods
-n_distinct(nyc$neighbourhood)
+```
 
+
+Below are the average price of the neighborhoods that have over 1,000 Airbnb locations. Midtown is most expensive and Bushwick is the cheapest.
+
+```{r n price, echo=FALSE, message=FALSE, warning=FALSE}
 #Looking at the distribution of the neighborhoods with >1000 locations
 nyc %>% group_by(neighbourhood) %>%
   summarize(n = n(), avg_price = mean(price), se = sd(price)/sqrt(n())) %>%
@@ -75,18 +110,36 @@ nyc %>% group_by(neighbourhood) %>%
   geom_errorbar() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
+```
+
+Below is the variation of average price by room type with Entire home/apt. being drastically more expensive
+
+```{r type avg, echo=FALSE, message=FALSE, warning=FALSE}
+
 #Room type variation
 nyc %>% group_by(room_type) %>%
-  summarize(n = n(), avg = mean(price), se = sd(price)/sqrt(n())) %>%
-  mutate(room_type = reorder(room_type, avg)) %>%
-  ggplot(aes(x = room_type, y = avg, ymin = avg - 2*se, ymax = avg + 2*se)) + 
+  summarize(n = n(), avg_price = mean(price), se = sd(price)/sqrt(n())) %>%
+  mutate(room_type = reorder(room_type, avg_price)) %>%
+  ggplot(aes(x = room_type, y = avg_price, ymin = avg_price - 2*se, ymax = avg_price + 2*se)) + 
   geom_point() +
   geom_errorbar() + 
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  ylim(0,220)
 
-#Looking at price distribution for outliers and see that under 500 makes sense
-filter_price <-nyc%>%filter( price<1000)
-histogram(filter_price$price)
+```
+
+In order to create my training and testing datasets, I decided to remove locations with a price of $0 or anything above $500 based on the outliers that were seen in the initial density plots. I then partitioned the data into 70% for the training and 30% for the testing set.
+
+#Modeling and Results
+
+I then began testing just the average first model on the price data, which gave a RMSE of 85.4. When I added the neighborhood group effects (b_g), this brought it down to 80.6. When testing neighborhood effects (b_n), it had a much better performance of 74.6, so I decided to stay with just b_n. The fourth model then used the room type effects (b_t) which significantly brought down the RMSE to 64.5.
+
+Then I then tried regularlizing the data because I figured that neighbourhoods that had more listings probably have more trustworthy prices that are more accurate. This only brought down my RSME to 64.1.
+
+Below is a table of results of modeling on my training data and testing my final model on my training dataset:
+
+```{r Model Results , echo=FALSE, message=FALSE, warning=FALSE}
+
 #Filtering everything above 0 and below 500. Removing outliers
 filter_nyc<-nyc%>% filter(price>0 & price <500)
 #This filter goes from 48,586 observations to 34,024 observations
@@ -99,11 +152,11 @@ test_set <- filter_nyc[-train_index, ]
 
 #Getting the average price for all NYC
 mu_hat <- mean(train_set$price)
-mu_hat
+
 
 #getting naive rmse
 naive_rmse <- RMSE(train_set$price, mu_hat)
-naive_rmse
+
 
 #creating rmse results matrix
 rmse_results <- data_frame(method = "Just the average", RMSE = naive_rmse)
@@ -124,7 +177,6 @@ model_1_rmse <- RMSE(predicted_price, train_set$price)
 rmse_results <- bind_rows(rmse_results,
                           data_frame(method="Neighbourhood Group Mode",
                                      RMSE = model_1_rmse ))
-rmse_results %>% knitr::kable()
 
 neigh_avgs <- train_set %>% 
   group_by(neighbourhood) %>% 
@@ -140,7 +192,6 @@ model_2_rmse <- RMSE(predicted_price, train_set$price)
 rmse_results <- bind_rows(rmse_results,
                           data_frame(method="Neighbourhood Model",
                                      RMSE = model_2_rmse ))
-rmse_results %>% knitr::kable()
 
 #Create Room Type Model with b_t and b_n
 type_avgs <- train_set %>% 
@@ -159,7 +210,6 @@ model_3_rmse <- RMSE(predicted_price, train_set$price)
 rmse_results <- bind_rows(rmse_results,
                           data_frame(method="Neighbourhood + Room Type Model",
                                      RMSE = model_3_rmse ))
-rmse_results %>% knitr::kable()
 
 
 #Creating Regularized Model of b_n and b_t
@@ -182,15 +232,11 @@ rmses <- sapply(lambdas, function(l){
     .$pred
   return(RMSE(predicted_price, train_set$price))
 })
-qplot(lambdas, rmses) 
-lambda <- lambdas[which.min(rmses)]
-lambda
 
+lambda <- lambdas[which.min(rmses)]
 rmse_results <- bind_rows(rmse_results,
                           data_frame(method="Regularized Neighbourhood + Room Type Model",  
                                      RMSE = min(rmses)))
-rmse_results %>% knitr::kable()
-
 
 #Testing the Final Regularized Model 
 lambdas <- seq(0, 80, 1)
@@ -212,7 +258,6 @@ rmses <- sapply(lambdas, function(l){
     .$pred
   return(RMSE(predicted_price, test_set$price))
 })
-qplot(lambdas, rmses) 
 
 rmse_results <- bind_rows(rmse_results,
                           data_frame(method="Testing Final Regularized Neighbourhood + Room Type Model",  
@@ -220,9 +265,44 @@ rmse_results <- bind_rows(rmse_results,
 rmse_results %>% knitr::kable()
 
 
+
+```
+
+Below is my final model used on the test set and the plot of the RSME's that were used to fine tune the lambda's for the regularization technique. You can see the optimal lambda for minimized RMSE is around 40:
+
+```{r Final Model, message=FALSE, warning=FALSE}
+
+#Testing the Final Regularized Model of b_n + b_t 
+lambdas <- seq(0, 80, 1)
+rmses <- sapply(lambdas, function(l){
+  mu <- mean(train_set$price)
+  b_n <- train_set %>%
+    group_by(neighbourhood) %>%
+    summarize(b_n = sum(price - mu)/(n()+l))
+  b_t <- train_set %>% 
+    left_join(b_n, by="neighbourhood") %>%
+    group_by(room_type) %>%
+    summarize(b_t = sum(price - b_n - mu)/(n()+l))
+  predicted_price <- 
+    test_set %>% 
+    left_join(b_n, by = "neighbourhood") %>%
+    left_join(b_t, by = "room_type") %>%
+    rowwise()  %>%
+    mutate(pred = sum( mu, b_n, b_t, na.rm=TRUE)) %>%
+    .$pred
+  return(RMSE(predicted_price, test_set$price))
+})
+qplot(lambdas, rmses) 
+
+
+```
+
+I then plotted the predicted prices to see how they compared with the actual prices. The plot is also colored by the room type. It looks as though even though I removed large outliers, the more expensive locations are causing a large amount of the error. It also looks as though some neighbourhoods are also clumping into columns. 
+
+```{r pred vs actual,echo=FALSE, message=FALSE, warning=FALSE}
+
 #Creating predication comparison of final model to analyze difference of prediction and actual price
 lambda <- lambdas[which.min(rmses)]
-lambda
 
 mu <- mean(train_set$price)
 b_n <- train_set %>%
@@ -238,20 +318,6 @@ predicted_price <-
   left_join(b_t, by = "room_type") %>%
   rowwise()  %>%
   mutate(pred = sum( mu, b_n, b_t, na.rm=TRUE))
-RMSE(predicted_price$pred, test_set$price)
-
-pred_price<-predicted_price$pred
-actual_price<-predicted_price$price
-
-qplot(pred_price, actual_price)
-
-#Looking at distribution of neighbourhood groups
-ggplot(predicted_price, aes(pred, price, color=neighbourhood_group)) +
-  theme(axis.title = element_text(), axis.title.x = element_text()) +
-  geom_point() +
-  ylab("price") +
-  xlab("pred") +
-  xlim(0,500)
 
 #Looking at distribution of room type
 ggplot(predicted_price, aes(pred, price, color=room_type)) +
@@ -259,23 +325,22 @@ ggplot(predicted_price, aes(pred, price, color=room_type)) +
   geom_point() +
   ylab("Actual Price") +
   xlab("Predicted Price")
+```
 
-#adjusting x axis to show how outliers affect the distribution
-ggplot(predicted_price, aes(pred, price, color=room_type)) +
-  theme(axis.title = element_text(), axis.title.x = element_text()) +
-  geom_point() +
-  ylab("Actual Price") +
-  xlab("Predicted Price") +
-  xlim(0,500)
+Below is a random sample of 20 predicted prices (pred) and actual price (price) with their difference (diff). You can see the majority fall within $40 of the actual price, but the more expensive locations tend to be farther off target.
 
+
+```{r sample ,echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 #Creating random sample of 20 predictions
 sample_results <- predicted_price %>% sample_n(20)%>% mutate(diff=pred-price) %>% 
   select(neighbourhood_group, neighbourhood, room_type, price, pred,diff) %>% 
   arrange(diff) 
 
 print(sample_results)
+```
+#Conclusion
 
-
+Using matrix factorization of the key descriptive factors of the location, I was able to more acurately predict the price of each airbnb. I was surprised to see that regularization did not improve the prediction of the price by much. The large price outliers are a challenging aspect of this dataset. It would be helpful if there was further information given about each location that could help convey other aspects that lead to a higher or lower price such as the quality of the space, amenities, or walking score. Further information may help predict these outliers. I would also like to add a confidence interval that would likely fall within the majority of the given prices as seen by the random sample where the majority of locations are within $40 of the actual price.
 
 
 
